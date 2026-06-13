@@ -195,8 +195,7 @@ class RepoIndexManager:
                 self._stop_monitoring_chunk(run_hash)
 
         except (aimrocks.errors.RocksIOError, aimrocks.errors.Corruption):
-            logger.warning(f'Indexing thread detected corrupted run: {run_hash}. Skipping.')
-            self._corrupted_runs.add(run_hash)
+            logger.warning(f'Indexing thread skipped run {run_hash} this cycle; will retry on next chunk change.')
         return True
 
     def _is_run_index_outdated(self, run_hash, index_db):
