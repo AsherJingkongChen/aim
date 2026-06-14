@@ -364,7 +364,9 @@ async function checkCredentials<T>(
       localStorage.setItem('refreshing', 'false');
     }
   }
-  return parseResponse<T>(response);
+  return Promise.reject(
+    new Error(`Request failed with status ${response.status}`),
+  );
 }
 
 const API = {
