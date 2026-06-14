@@ -54,7 +54,7 @@ SETUP_REQUIRED = [
 
 # What packages are required for this module to be executed?
 REQUIRED = [
-    f'aim-ui=={__version__}',
+    'aim-ui @ git+https://github.com/AsherJingkongChen/aim@main#subdirectory=aim/web/ui',
     'aimrecords==0.0.7',
     'aimrocks==0.5.*',
     'cachetools>=4.0.0',
