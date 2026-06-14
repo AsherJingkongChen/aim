@@ -1,4 +1,5 @@
 import asyncio
+import os
 import random
 import struct
 import time
@@ -39,7 +40,21 @@ def get_run_or_404(run_id, repo=None):
     if repo is None:
         repo = get_project_repo()
 
+    chunk_path = os.path.join(repo.path, 'meta', 'chunks', run_id)
+    chunk_exists = os.path.isdir(chunk_path)
+
     run = repo.get_run(run_id)
+    # Active runs may have a chunk dir on disk before the indexer has registered
+    # the hash in the main index. Retry briefly so the UI does not flap to 404
+    # while the background indexer catches up.
+    for _ in range(5):
+        if run:
+            return run
+        if not chunk_exists:
+            break
+        time.sleep(0.2)
+        run = repo.get_run(run_id)
+
     if not run:
         raise HTTPException(status_code=404, detail='Run not found.')
 
