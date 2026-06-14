@@ -124,8 +124,10 @@ def up(
     if profiler:
         os.environ[AIM_PROFILER_KEY] = '1'
 
-    index_mng = RepoIndexManager.get_index_manager(repo_inst)
-    index_mng.start()
+    # Indexer thread disabled: senders (AimLogger) now call index() inline so the
+    # main index DB has a single writer (the sender process), avoiding cross-process
+    # RocksDB races between aim-up indexer and sender writes.
+    RepoIndexManager.get_index_manager(repo_inst)
 
     run_status_mng = RunStatusManager(repo_inst)
     run_status_mng.start()

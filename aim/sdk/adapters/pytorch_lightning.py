@@ -176,6 +176,15 @@ class AimLogger(Logger):
             name, context = self.parse_context(k)
             self.experiment.track(v, name=name, step=step, epoch=epoch, context=context)
 
+        # Inline indexing so the UI sees this active run live without waiting for
+        # the aim-up indexer thread (which races with the writer across processes).
+        try:
+            from aim.sdk.index_manager import RepoIndexManager
+
+            RepoIndexManager.get_index_manager(self.experiment.repo).index(self.experiment.hash)
+        except Exception as exc:
+            warnings.warn(f'Inline indexing failed: {exc}')
+
     def parse_context(self, name):
         context = {}
 
