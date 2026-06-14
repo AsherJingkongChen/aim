@@ -37,10 +37,58 @@ else:
         'or \n pip install lightning'
     )
 
+import queue
+import threading
+import time
+
 from aim.ext.resource.configs import DEFAULT_SYSTEM_TRACKING_INT
 from aim.sdk.repo import Repo
 from aim.sdk.run import Run
 from aim.sdk.utils import clean_repo_path, get_aim_repo_name
+
+
+# Background indexer: AimLogger.log_metrics enqueues run hashes; a daemon thread
+# drains the queue calling RepoIndexManager.index, retrying transient RocksDB
+# lock contention without blocking the training thread.
+_aim_index_queue: 'queue.Queue[tuple]' = queue.Queue()
+_aim_index_thread: Optional[threading.Thread] = None
+_aim_index_lock = threading.Lock()
+
+
+def _aim_index_worker() -> None:
+    from aim.sdk.index_manager import RepoIndexManager
+
+    while True:
+        repo, run_hash = _aim_index_queue.get()
+        try:
+            manager = RepoIndexManager.get_index_manager(repo)
+            for attempt in range(5):
+                try:
+                    manager.index(run_hash)
+                    break
+                except Exception as exc:
+                    if attempt == 4:
+                        warnings.warn(f'Background indexing failed after retries: {exc}')
+                    else:
+                        time.sleep(0.2 * (attempt + 1))
+        finally:
+            _aim_index_queue.task_done()
+
+
+def _schedule_aim_index(repo, run_hash: str) -> None:
+    global _aim_index_thread
+    with _aim_index_lock:
+        if _aim_index_thread is None or not _aim_index_thread.is_alive():
+            _aim_index_thread = threading.Thread(
+                target=_aim_index_worker,
+                name='AimLoggerIndexer',
+                daemon=True,
+            )
+            _aim_index_thread.start()
+    try:
+        _aim_index_queue.put_nowait((repo, run_hash))
+    except queue.Full:
+        pass
 
 
 class AimLogger(Logger):
@@ -176,21 +224,9 @@ class AimLogger(Logger):
             name, context = self.parse_context(k)
             self.experiment.track(v, name=name, step=step, epoch=epoch, context=context)
 
-        # Inline indexing so the UI sees this active run live without waiting for
-        # the aim-up indexer thread (which races with the writer across processes).
-        # Retry a few times because the writer briefly holds RocksDB locks.
-        from aim.sdk.index_manager import RepoIndexManager
-        import time as _time
-        _idx = RepoIndexManager.get_index_manager(self.experiment.repo)
-        for _attempt in range(5):
-            try:
-                _idx.index(self.experiment.hash)
-                break
-            except Exception as exc:
-                if _attempt == 4:
-                    warnings.warn(f'Inline indexing failed after retries: {exc}')
-                else:
-                    _time.sleep(0.1 * (_attempt + 1))
+        # Async background indexing so the UI sees this active run live without
+        # blocking the main training thread on RocksDB I/O.
+        _schedule_aim_index(self.experiment.repo, self.experiment.hash)
 
     def parse_context(self, name):
         context = {}
