@@ -178,12 +178,19 @@ class AimLogger(Logger):
 
         # Inline indexing so the UI sees this active run live without waiting for
         # the aim-up indexer thread (which races with the writer across processes).
-        try:
-            from aim.sdk.index_manager import RepoIndexManager
-
-            RepoIndexManager.get_index_manager(self.experiment.repo).index(self.experiment.hash)
-        except Exception as exc:
-            warnings.warn(f'Inline indexing failed: {exc}')
+        # Retry a few times because the writer briefly holds RocksDB locks.
+        from aim.sdk.index_manager import RepoIndexManager
+        import time as _time
+        _idx = RepoIndexManager.get_index_manager(self.experiment.repo)
+        for _attempt in range(5):
+            try:
+                _idx.index(self.experiment.hash)
+                break
+            except Exception as exc:
+                if _attempt == 4:
+                    warnings.warn(f'Inline indexing failed after retries: {exc}')
+                else:
+                    _time.sleep(0.1 * (_attempt + 1))
 
     def parse_context(self, name):
         context = {}
